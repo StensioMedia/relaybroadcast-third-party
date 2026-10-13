@@ -1,0 +1,118 @@
+# Bygger Windows-appens ffmpeg (x86_64, GPL version 2 or later, ett smalt
+# bygge med bara det appen använder). Licensbyggplanen uppgift 3.
+#
+# Hör hemma i det publika repot StensioMedia/relaybroadcast-third-party som
+# .github/workflows/build-ffmpeg-windows.yml, tillsammans med build.sh,
+# versions.env och check.ps1 i scripts/win-ffmpeg/. I RelayBroadcasts eget
+# repo ligger den bara som förlaga: GitHub kör aldrig en fil utanför
+# .github/workflows.
+#
+# Tre jobb: (1) Ubuntu korskompilerar med mingw-w64, (2) Windows kontrollerar
+# binärerna med check.ps1, (3) bara med publish_release: filerna läggs i
+# releasen v<app_version>. Releasen skapas om den saknas, annars läggs filerna
+# till — Mac-jobbet skapar samma release, och alla Windows-filer börjar därför
+# med "windows-". En fil som redan finns skrivs ALDRIG över: jobbet stoppar.
+# En release tas aldrig bort, den kompletteras.
+name: Build FFmpeg for Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: "RelayBroadcast version this build ships with (e.g. 2.0.0)"
+        required: true
+      publish_release:
+        description: "Add the Windows files to the release v<app_version>"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # bara för att kunna skapa och komplettera releasen
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 clang lld nasm cmake meson ninja-build pkg-config gnupg
+
+      - name: Build and check
+        run: bash scripts/win-ffmpeg/build.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-windows-x64-${{ inputs.app_version }}
+          path: scripts/win-ffmpeg/ut/
+          if-no-files-found: error
+
+  check:
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-windows-x64-${{ inputs.app_version }}
+          path: ut
+
+      - name: Check on Windows
+        shell: pwsh
+        run: ./scripts/win-ffmpeg/check.ps1 -Mapp "$PWD/ut"
+
+  release:
+    needs: check
+    if: ${{ inputs.publish_release }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-windows-x64-${{ inputs.app_version }}
+          path: ut
+
+      - name: Add to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAGG: v${{ inputs.app_version }}
+          VER: ${{ inputs.app_version }}
+        run: |
+          set -euo pipefail
+          cd ut
+          ZIP="windows-ffmpeg-$VER.zip"
+          TAR="windows-ffmpeg-source-$VER.tar"
+          SUMS="windows-SHA256SUMS"
+          zip -r -q "$ZIP" ffmpeg.exe ffprobe.exe licenses CONFIGURE.txt
+          tar -cf "$TAR" source
+          sha256sum "$ZIP" "$TAR" > "$SUMS"
+          if gh release view "$TAGG" >/dev/null 2>&1; then
+            FINNS="$(gh release view "$TAGG" --json assets --jq '.assets[].name')"
+            for f in "$ZIP" "$TAR" "$SUMS"; do
+              if grep -qx "$f" <<<"$FINNS"; then
+                echo "The release $TAGG already has $f. Files are never replaced." >&2
+                exit 1
+              fi
+            done
+            gh release upload "$TAGG" "$ZIP" "$TAR" "$SUMS"
+          else
+            {
+              echo "Source code and builds of the third-party components shipped with RelayBroadcast $VER."
+              echo
+              echo "Windows: FFmpeg built by scripts/win-ffmpeg/build.sh (GPL version 2 or later, never nonfree or version3)."
+              echo "The configure line is in CONFIGURE.txt inside $ZIP; the complete corresponding source is $TAR."
+              echo
+              echo "SHA-256:"
+              echo '```'
+              cat "$SUMS"
+              echo '```'
+            } > ../release-notes.md
+            gh release create "$TAGG" --title "RelayBroadcast $VER — third-party source" \
+              --notes-file ../release-notes.md "$ZIP" "$TAR" "$SUMS"
+          fi

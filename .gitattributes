@@ -1,0 +1,3 @@
+# Line endings: LF everywhere (build.sh runs on Linux), CRLF for PowerShell.
+* text=auto eol=lf
+*.ps1 text eol=crlf
