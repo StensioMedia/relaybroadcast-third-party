@@ -242,6 +242,17 @@ steg "x264 $X264_COMMIT"
 # --- 11. FFmpeg ------------------------------------------------------------
 steg "FFmpeg $FFMPEG_VERSION"
 cd "$ARB/src/ffmpeg-$FFMPEG_VERSION"
+# Vad pkg-config säger om biblioteken, innan configure frågar. Första bygget
+# på GitHub (2026-10-13) föll på "srt >= 1.3.0 not found using pkg-config"
+# utan att säga varför; svaret står i ffbuild/config.log, som skrivs ut nedan.
+for pc in srt x264 ffnvcodec vpl opus dav1d libxml-2.0 mbedtls mbedcrypto; do
+  echo "pkg-config $pc: $(pkg-config --static --modversion "$pc" 2>&1 | tr '\n' ' ')| $(pkg-config --static --cflags --libs "$pc" 2>&1 | tr '\n' ' ')"
+done
+konfigurationsfel() {
+  echo "--- slutet av ffbuild/config.log ---"
+  tail -n 120 ffbuild/config.log || true
+  fel "FFmpegs configure föll (se raderna ovan)"
+}
 ./configure --prefix="$P" --target-os=mingw32 --arch=x86_64 --cross-prefix="$VARD-" \
   --cc="$CC_X" --cxx="$CXX_X" --pkg-config=pkg-config --pkg-config-flags=--static \
   --extra-cflags="-I$P/include -DLIBXML_STATIC" \
@@ -251,7 +262,8 @@ cd "$ARB/src/ffmpeg-$FFMPEG_VERSION"
   --enable-ffnvcodec --enable-nvenc --enable-nvdec --enable-cuvid --enable-cuda-llvm \
   --enable-libvpl --enable-amf --enable-mediafoundation --enable-d3d11va --enable-dxva2 \
   --enable-schannel --enable-libopus --enable-libdav1d --enable-zlib --enable-libxml2 \
-  --disable-ffplay --disable-doc --disable-debug --disable-shared --enable-static
+  --disable-ffplay --disable-doc --disable-debug --disable-shared --enable-static \
+  || konfigurationsfel
 make -j "$JOBB"
 cp ffmpeg.exe ffprobe.exe "$UT/"
 
