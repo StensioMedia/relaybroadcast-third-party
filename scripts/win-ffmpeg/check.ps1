@@ -43,8 +43,11 @@ if ($conf -match '--enable-nonfree') { Fel '-buildconf har --enable-nonfree' } e
 if ($conf -match '--enable-version3') { Fel '-buildconf har --enable-version3' } else { Ok 'inte --enable-version3' }
 $konfFil = Join-Path $Mapp 'CONFIGURE.txt'
 if (Test-Path $konfFil) {
-  $rad = (Get-Content -Raw $konfFil).Trim()
-  if ($conf.Contains($rad)) { Ok 'CONFIGURE.txt är samma rad som -buildconf' } else { Fel 'CONFIGURE.txt skiljer sig från -buildconf' }
+  # -buildconf skriver varje flagga på en egen rad (tredje bygget på GitHub,
+  # 2026-10-13); blanksteg och radbrytningar räknas därför som ett blanksteg.
+  $rad = ((Get-Content -Raw $konfFil) -replace '\s+', ' ').Trim()
+  $buildconf = ($conf -replace '\s+', ' ')
+  if ($buildconf.Contains($rad)) { Ok 'CONFIGURE.txt är samma flaggor som -buildconf' } else { Fel 'CONFIGURE.txt skiljer sig från -buildconf' }
 }
 $lic = Kor @('-L')
 if ($lic -notmatch 'GNU General Public License') { Fel '-L nämner inte GNU General Public License' } else { Ok '-L: GNU General Public License' }
