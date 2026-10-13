@@ -232,6 +232,17 @@ cmake -S srt -B "$ARB/bygg-srt" "${CMAKE_GEMENSAMT[@]}" \
   -DENABLE_ENCRYPTION=ON -DUSE_ENCLIB=mbedtls -DENABLE_STDCXX_SYNC=ON
 cmake --build "$ARB/bygg-srt" -j "$JOBB"
 cmake --install "$ARB/bygg-srt"
+# srt.pc skriver Mbed TLS som fullständiga sökvägar till .a-filerna och tar med
+# -lgcc_s (GCC:s körbibliotek som DLL). FFmpegs configure fick då ingen Mbed TLS
+# i länkningen ("undefined reference to mbedtls_aes_setkey_enc", andra bygget
+# på GitHub 2026-10-13), och -lgcc_s hade gett ett beroende till
+# libgcc_s_seh-1.dll. Raden skrivs om: Mbed TLS med -l i länkordning (tls,
+# x509, crypto), och Windows egna bibliotek.
+for pc in "$P/lib/pkgconfig/srt.pc" "$P/lib/pkgconfig/haisrt.pc"; do
+  [ -f "$pc" ] || continue
+  sed -i -E 's#^Libs\.private:.*#Libs.private: -lmbedtls -lmbedx509 -lmbedcrypto -lbcrypt -lws2_32 -lstdc++#; /^Requires\.private:/d' "$pc"
+done
+echo "srt.pc: $(grep -E '^Libs' "$P/lib/pkgconfig/srt.pc" | tr '\n' ' ')"
 
 # --- 10. x264 --------------------------------------------------------------
 steg "x264 $X264_COMMIT"
